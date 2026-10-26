@@ -573,6 +573,48 @@ Override the available width to WIDTH."
         (should-not (string-suffix-p "\n" before)))
       (org-table-wrap-mode -1))))
 
+;;;; Passing through several tables
+
+(ert-deftest org-table-wrap-test-passing-two-tables-rewraps-both ()
+  "Leaving one table and then another before idle rewraps both."
+  (let ((row "| Very long column header one | Very long column header two |\n"))
+    (org-table-wrap-test-with-width 30
+        (concat "Before.\n" row "\nMiddle.\n\n" row "\nAfter.\n")
+      (org-table-wrap-mode 1)
+      (should (= (length org-table-wrap--overlays) 2))
+      (dolist (target '("| Very" "Middle" "| Very" "After"))
+        (re-search-forward (regexp-quote target))
+        (org-table-wrap--post-command))
+      ;; Batch Emacs never goes idle, so run the scheduled re-wraps here.
+      (dolist (timer (copy-sequence timer-idle-list))
+        (when (eq (timer--function timer)
+                  #'org-table-wrap--process-table-when-idle)
+          (cancel-timer timer)
+          (apply (timer--function timer) (timer--args timer))))
+      (should (= (length org-table-wrap--overlays) 2))
+      (org-table-wrap-mode -1))))
+
+(ert-deftest org-table-wrap-test-reentering-table-schedules-once ()
+  "Leaving the same table again before idle keeps a single pending rewrap."
+  (org-table-wrap-test-with-width 30
+      (concat "Before.\n"
+              "| Very long column header one | Very long column header two |\n"
+              "After.\n")
+    (org-table-wrap-mode 1)
+    (dotimes (_ 3)
+      (goto-char (point-min))
+      (forward-line 1)
+      (org-table-wrap--post-command)
+      (goto-char (point-min))
+      (org-table-wrap--post-command))
+    (should (= (cl-count-if
+                (lambda (timer)
+                  (eq (timer--function timer)
+                      #'org-table-wrap--process-table-when-idle))
+                timer-idle-list)
+               1))
+    (org-table-wrap-mode -1)))
+
 ;;;; Reprocessing keeps tables wrapped
 
 (ert-deftest org-table-wrap-test-reprocessing-keeps-wrap ()

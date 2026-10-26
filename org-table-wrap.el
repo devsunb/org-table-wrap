@@ -91,8 +91,8 @@ is too narrow for your setup."
 (defvar org-table-wrap--resize-timer nil
   "Idle timer for debouncing window resize events.")
 
-(defvar-local org-table-wrap--pending-table-timer nil
-  "Idle timer for re-processing the table most recently left by point.")
+(defvar-local org-table-wrap--pending-table-timers nil
+  "Idle timers for re-processing the tables left by point.")
 
 (defconst org-table-wrap--idle-delay 0.2
   "Idle delay before deferred visual table updates run.")
@@ -802,22 +802,38 @@ table region normally, so `org-at-table-p' works."
         (setq org-table-wrap--current-table in-table))))))
 
 (defun org-table-wrap--schedule-table-process (beg end)
-  "Schedule the table between BEG and END for idle re-processing."
-  (org-table-wrap--cancel-pending-table-process)
-  (let ((buffer (current-buffer))
-        (beg-marker (copy-marker beg t))
-        (end-marker (copy-marker end)))
-    (setq org-table-wrap--pending-table-timer
-          (run-with-idle-timer
-           org-table-wrap--idle-delay nil
-           #'org-table-wrap--process-table-when-idle
-           buffer beg-marker end-marker))))
+  "Schedule the table between BEG and END for idle re-processing.
+Tables scheduled earlier stay scheduled, so passing quickly through
+several tables wraps all of them again.  A table that is already
+scheduled is not scheduled twice."
+  (org-table-wrap--forget-run-timers)
+  (unless (cl-some (lambda (timer)
+                     (eql (marker-position (nth 1 (timer--args timer))) beg))
+                   org-table-wrap--pending-table-timers)
+    (org-table-wrap--add-pending-timer
+     (run-with-idle-timer
+      org-table-wrap--idle-delay nil
+      #'org-table-wrap--process-table-when-idle
+      (current-buffer) (copy-marker beg t) (copy-marker end)))))
+
+(defun org-table-wrap--forget-run-timers ()
+  "Forget pending timers that have already run."
+  (setq org-table-wrap--pending-table-timers
+        (cl-remove-if-not (lambda (timer)
+                            (memq timer timer-idle-list))
+                          org-table-wrap--pending-table-timers)))
+
+(defun org-table-wrap--add-pending-timer (timer)
+  "Track TIMER among the pending timers."
+  (org-table-wrap--forget-run-timers)
+  (push timer org-table-wrap--pending-table-timers))
 
 (defun org-table-wrap--cancel-pending-table-process ()
-  "Cancel the pending idle table re-processing timer."
-  (when org-table-wrap--pending-table-timer
-    (cancel-timer org-table-wrap--pending-table-timer)
-    (setq org-table-wrap--pending-table-timer nil)))
+  "Cancel the pending idle table re-processing timers."
+  (dolist (timer org-table-wrap--pending-table-timers)
+    (when (timerp timer)
+      (cancel-timer timer)))
+  (setq org-table-wrap--pending-table-timers nil))
 
 (defun org-table-wrap--process-table-when-idle (buffer beg-marker end-marker)
   "Process the table in BUFFER between BEG-MARKER and END-MARKER."
@@ -836,11 +852,11 @@ table region normally, so `org-at-table-p' works."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (when org-table-wrap-mode
-        (setq org-table-wrap--pending-table-timer
-              (run-with-idle-timer
-               org-table-wrap--idle-delay nil
-               #'org-table-wrap--process-table-when-idle
-               buffer beg-marker end-marker))))))
+        (org-table-wrap--add-pending-timer
+         (run-with-idle-timer
+          org-table-wrap--idle-delay nil
+          #'org-table-wrap--process-table-when-idle
+          buffer beg-marker end-marker))))))
 
 (defun org-table-wrap--process-table-safely (buffer beg-marker end-marker)
   "Process BUFFER's marked table without entering recursive debuggers.
@@ -859,7 +875,6 @@ BEG-MARKER and END-MARKER delimit the table to process."
   "Process BUFFER's table between BEG-MARKER and END-MARKER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
-      (setq org-table-wrap--pending-table-timer nil)
       (when (and org-table-wrap-mode (derived-mode-p 'org-mode))
         (let ((bounds (org-table-wrap--live-table-bounds
                        beg-marker end-marker)))
