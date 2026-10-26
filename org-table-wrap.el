@@ -539,7 +539,7 @@ Merges FACE with any existing faces at each position."
     (org-table-wrap--clear-overlay-entry entry))
   (setq org-table-wrap--overlays nil)
   ;; Remove our invisibility spec
-  (remove-from-invisibility-spec '(org-table-wrap . t)))
+  (remove-from-invisibility-spec 'org-table-wrap))
 
 (defun org-table-wrap--remove-overlay-at (beg end)
   "Remove the org-table-wrap overlay for the table at BEG..END."
@@ -562,8 +562,12 @@ keeping point traversal) and `before-string' (to show the wrapped
 rendering).  DISPLAY-STRING is the wrapped rendering."
   ;; Remove any existing overlay for this region
   (org-table-wrap--remove-overlay-at beg end)
-  ;; Ensure our invisibility spec is registered
-  (add-to-invisibility-spec '(org-table-wrap . t))
+  ;; Ensure our invisibility spec is registered, once and without an
+  ;; ellipsis: `(org-table-wrap . t)' would draw "..." where the table
+  ;; text is hidden, at the start of the wrapped rendering.
+  (unless (and (listp buffer-invisibility-spec)
+               (memq 'org-table-wrap buffer-invisibility-spec))
+    (add-to-invisibility-spec 'org-table-wrap))
   ;; Exclude trailing newline from the overlay so the invisible region
   ;; ends at the last table character; otherwise the newline after the
   ;; table would be swallowed and the before-string would merge with

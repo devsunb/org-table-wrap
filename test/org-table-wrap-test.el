@@ -573,5 +573,19 @@ Override the available width to WIDTH."
         (should-not (string-suffix-p "\n" before)))
       (org-table-wrap-mode -1))))
 
+;;;; Invisibility spec
+
+(ert-deftest org-table-wrap-test-hides-without-ellipsis ()
+  "Wrapped tables are hidden without an ellipsis."
+  (org-table-wrap-test-with-width 30
+      "| Very long column header one | Very long column header two |\n"
+    (org-table-wrap-mode 1)
+    (should (= (length org-table-wrap--overlays) 1))
+    (should-not (member '(org-table-wrap . t) buffer-invisibility-spec))
+    ;; Text under the overlay is hidden outright, not shown as "...".
+    (should (eq (invisible-p (point-min)) t))
+    (org-table-wrap-mode -1)
+    (should-not (memq 'org-table-wrap buffer-invisibility-spec))))
+
 (provide 'org-table-wrap-test)
 ;;; org-table-wrap-test.el ends here
