@@ -171,8 +171,9 @@ Only includes tables that are visible (not inside folded headings/drawers)."
       (goto-char (point-min))
       (while (re-search-forward "^[ \t]*|" nil t)
         (let ((start (line-beginning-position)))
-          ;; Check if this line is visible
-          (when (and (not (org-invisible-p (point)))
+          ;; Check if this line is visible.  Only folding counts: the
+          ;; text of a table we wrapped is hidden by our own overlay.
+          (when (and (not (org-invisible-p (point) t))
                      (org-at-table-p))
             ;; Find the extent of this table
             (let ((end (org-table-end)))
@@ -695,12 +696,13 @@ the display string."
 (defun org-table-wrap--process-table (beg end)
   "Process a single table between BEG and END.
 Apply a wrapping overlay if the table overflows the window."
+  ;; Measure the table itself, not the wrapped rendering of an earlier
+  ;; pass, which would always fit.
+  (org-table-wrap--remove-overlay-at beg end)
   (let* ((table-width (org-table-wrap--table-width beg end))
          (win-width (org-table-wrap--available-width beg)))
-    (if (<= table-width win-width)
-        ;; Table fits; remove any existing overlay
-        (org-table-wrap--remove-overlay-at beg end)
-      ;; Table overflows; build wrapped display
+    ;; Wrap only a table that overflows; one that fits stays unwrapped
+    (when (> table-width win-width)
       (font-lock-ensure beg end)  ; ensure text properties are up to date
       (save-excursion
         (goto-char beg)  ; ensure point is at the table for prefix measurement

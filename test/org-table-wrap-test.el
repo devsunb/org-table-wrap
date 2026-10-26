@@ -573,6 +573,59 @@ Override the available width to WIDTH."
         (should-not (string-suffix-p "\n" before)))
       (org-table-wrap-mode -1))))
 
+;;;; Reprocessing keeps tables wrapped
+
+(ert-deftest org-table-wrap-test-reprocessing-keeps-wrap ()
+  "Reprocessing, as a window change does, keeps a wrapped table wrapped.
+The table text is hidden by our own overlay, which must not make table
+detection skip it, and the spec is registered once."
+  (org-table-wrap-test-with-width 30
+      "| Very long column header one | Very long column header two |\n"
+    (org-table-wrap-mode 1)
+    (dotimes (_ 3)
+      (org-table-wrap--process-buffer)
+      (should (= (length org-table-wrap--overlays) 1)))
+    (should (= (cl-count 'org-table-wrap buffer-invisibility-spec) 1))
+    (org-table-wrap-mode -1)))
+
+(ert-deftest org-table-wrap-test-reprocessing-measures-table ()
+  "Reprocessing measures the table, not its wrapped rendering.
+Measured on a live window as in an interactive session, where the
+rendering of an earlier pass always fits."
+  (with-temp-buffer
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (org-mode)
+      (insert "text\n\n| a | " (make-string 300 ?x) " |\n| b | short |\n\nafter\n")
+      (goto-char (point-min))
+      (let ((noninteractive nil))
+        (org-table-wrap-mode 1)
+        (dotimes (_ 3)
+          (org-table-wrap--process-buffer)
+          (should (= (length org-table-wrap--overlays) 1)))
+        (org-table-wrap-mode -1)))))
+
+(ert-deftest org-table-wrap-test-reprocessing-unwraps-fitting-table ()
+  "A wrapped table that fits after the window widens is unwrapped."
+  (org-table-wrap-test-with-width 30
+      "| Very long column header one | Very long column header two |\n"
+    (org-table-wrap-mode 1)
+    (should (= (length org-table-wrap--overlays) 1))
+    (cl-letf (((symbol-function 'org-table-wrap--available-width)
+               (lambda (&optional _pos) 200)))
+      (org-table-wrap--process-buffer))
+    (should (null org-table-wrap--overlays))
+    (org-table-wrap-mode -1)))
+
+(ert-deftest org-table-wrap-test-skips-folded-table ()
+  "A table inside a folded heading is still left alone."
+  (org-table-wrap-test-with-width 30
+      (concat "* Heading\n"
+              "| Very long column header one | Very long column header two |\n"
+              "* Next\n")
+    (org-fold-hide-subtree)
+    (should (null (org-table-wrap--find-tables)))))
+
 ;;;; Invisibility spec
 
 (ert-deftest org-table-wrap-test-hides-without-ellipsis ()
