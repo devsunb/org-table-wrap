@@ -397,6 +397,92 @@ Override the available width to WIDTH."
       (should org-table-wrap--current-table)
       (org-table-wrap-mode -1))))
 
+;;;; Entering a wrapped table
+
+(defun org-table-wrap-test--enter-at-overlay-end ()
+  "Put point where line motion lands in the wrapped table, then run the hook.
+Line and page motion skip the hidden table text and stop at the end of
+the overlay, just before the newline after the last row."
+  (goto-char (overlay-end (nth 2 (car org-table-wrap--overlays))))
+  (org-table-wrap--post-command))
+
+(ert-deftest org-table-wrap-test-entering-from-above-lands-on-first-row ()
+  "Moving down into a wrapped table puts point on its first row."
+  (let ((row "| Very long column header one | Very long column header two |\n"))
+    (org-table-wrap-test-with-width 30
+        (concat "Before.\n" row row row "After.\n")
+      (org-table-wrap-mode 1)
+      (goto-char (+ (point-min) 3))
+      (org-table-wrap--post-command)
+      (org-table-wrap-test--enter-at-overlay-end)
+      (should (= (line-number-at-pos) 2))
+      (should (= (current-column) 3))
+      (should (null org-table-wrap--overlays))
+      (org-table-wrap-mode -1))))
+
+(ert-deftest org-table-wrap-test-entering-from-below-lands-on-last-row ()
+  "Moving up into a wrapped table puts point on its last row, same column."
+  (let ((row "| Very long column header one | Very long column header two |\n"))
+    (org-table-wrap-test-with-width 30
+        (concat "Before.\n" row row row "After.\n")
+      (org-table-wrap-mode 1)
+      (goto-char (point-max))
+      (forward-line -1)
+      (forward-char 2)
+      (org-table-wrap--post-command)
+      (org-table-wrap-test--enter-at-overlay-end)
+      (should (= (line-number-at-pos) 4))
+      (should (= (current-column) 2))
+      (org-table-wrap-mode -1))))
+
+(ert-deftest org-table-wrap-test-entering-below-window-start-keeps-point ()
+  "When page motion scrolled past the first row, point stays where it is."
+  (let ((row "| Very long column header one | Very long column header two |\n"))
+    (org-table-wrap-test-with-width 30
+        (concat "Before.\n" row row row "After.\n")
+      (save-window-excursion
+        (switch-to-buffer (current-buffer))
+        (org-table-wrap-mode 1)
+        (goto-char (point-min))
+        (org-table-wrap--post-command)
+        (let ((landing (overlay-end (nth 2 (car org-table-wrap--overlays)))))
+          (set-window-start nil (save-excursion
+                                  (goto-char landing)
+                                  (line-beginning-position)))
+          (goto-char landing)
+          (org-table-wrap--post-command)
+          (should (= (point) landing)))
+        (org-table-wrap-mode -1)))))
+
+(ert-deftest org-table-wrap-test-entering-one-before-overlay-end ()
+  "Landing one character before the overlay end, as in Evil's normal
+state, which keeps point off the end of the line, counts as well."
+  (let ((row "| Very long column header one | Very long column header two |\n"))
+    (org-table-wrap-test-with-width 30
+        (concat "Before.\n" row row row "After.\n")
+      (org-table-wrap-mode 1)
+      (goto-char (point-min))
+      (org-table-wrap--post-command)
+      (goto-char (1- (overlay-end (nth 2 (car org-table-wrap--overlays)))))
+      (org-table-wrap--post-command)
+      (should (= (line-number-at-pos) 2))
+      (org-table-wrap-mode -1))))
+
+(ert-deftest org-table-wrap-test-jumping-into-table-keeps-point ()
+  "A command that puts point inside the table directly keeps it there."
+  (let ((row "| Very long column header one | Very long column header two |\n"))
+    (org-table-wrap-test-with-width 30
+        (concat "Before.\n" row row row "After.\n")
+      (org-table-wrap-mode 1)
+      (org-table-wrap--post-command)
+      (goto-char (point-min))
+      (forward-line 2)
+      (forward-char 4)
+      (org-table-wrap--post-command)
+      (should (= (line-number-at-pos) 3))
+      (should (= (current-column) 4))
+      (org-table-wrap-mode -1))))
+
 ;;;; Multiple tables handled independently
 
 (ert-deftest org-table-wrap-test-multiple-tables ()

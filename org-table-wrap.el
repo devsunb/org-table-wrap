@@ -88,6 +88,9 @@ is too narrow for your setup."
 (defvar-local org-table-wrap--current-table nil
   "Cons of (BEG . END) for the table point is currently inside, or nil.")
 
+(defvar-local org-table-wrap--last-point nil
+  "Point after the previous command, to tell where point entered a table from.")
+
 (defvar org-table-wrap--resize-timer nil
   "Idle timer for debouncing window resize events.")
 
@@ -791,9 +794,40 @@ table region normally, so `org-at-table-p' works."
            (cdr org-table-wrap--current-table)))
         ;; Remove overlay from the table we entered (if any).
         (when in-table
-          (org-table-wrap--remove-overlay-at
-           (car in-table) (cdr in-table)))
-        (setq org-table-wrap--current-table in-table))))))
+          (let* ((ov (nth 2 (org-table-wrap--find-overlay-at (car in-table))))
+                 (landing (and (overlayp ov) (overlay-end ov))))
+            (org-table-wrap--remove-overlay-at
+             (car in-table) (cdr in-table))
+            (when landing
+              (org-table-wrap--place-entering-point in-table landing))))
+        (setq org-table-wrap--current-table in-table))))
+    (setq org-table-wrap--last-point (point))))
+
+(defun org-table-wrap--place-entering-point (table landing)
+  "Put point on the row it entered the wrapped TABLE through.
+TABLE is (BEG . END) and LANDING is the end of the overlay that hid it,
+already removed so that the table text is visible again.  Line and
+page motion skip the hidden table text and stop at LANDING, on the last
+row, from above as well as from below.  When point came from above,
+put it on the first row, and in both cases in the column it was in
+before.  Point put inside the table directly, e.g. by going to a line,
+stays where it is."
+  (let ((last org-table-wrap--last-point))
+    (when (and last
+               (<= last (point-max))
+               ;; Evil's normal state keeps point off the end of the line.
+               (memq (- landing (point)) '(0 1))
+               (or (< last (car table)) (> last landing)))
+      (let ((column (save-excursion (goto-char last) (current-column)))
+            (row (if (< last (car table))
+                     (car table)
+                   (line-beginning-position)))
+            (win (get-buffer-window (current-buffer))))
+        ;; A page motion may have scrolled past the first row; moving
+        ;; point there would make redisplay move it again.
+        (when (or (null win) (>= row (window-start win)))
+          (goto-char row)
+          (move-to-column column))))))
 
 (defun org-table-wrap--schedule-table-process (beg end)
   "Schedule the table between BEG and END for idle re-processing."
